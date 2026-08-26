@@ -1,0 +1,11 @@
+path,verdict,seconds,restarts,deleted
+benchmarks/hard60/aim-200-1_6-no-1.cnf,UNSAT,0.000,0,0
+benchmarks/hard60/hanoi4.cnf,SAT,0.038,29,1871
+benchmarks/hard60/hanoi5.cnf,SAT,0.710,253,46593
+benchmarks/hard60/hole10.cnf,UNKNOWN,60.086,3577,1134284
+benchmarks/hard60/hole9.cnf,UNKNOWN,60.062,3132,1026028
+benchmarks/hard60/par16-1.cnf,SAT,0.207,60,6009
+benchmarks/hard60/par16-2.cnf,SAT,0.236,61,6079
+benchmarks/hard60/par16-3.cnf,SAT,0.044,19,925
+benchmarks/hard60/par16-4.cnf,SAT,0.010,6,0
+benchmarks/hard60/par16-5.cnf,SAT,0.241,62,7789

@@ -1,6 +1,6 @@
 //! Differential fuzz corpus generator + our-side solver.
 //!
-//! Usage: fuzz <count> <out_dir> [seed]
+//! Usage: fuzz <count> <out_dir> [seed] [evsids|vmtf]
 //! Writes <out_dir>/<i>.cnf for each instance and <out_dir>/ours.txt with
 //! lines "<i> SAT|UNSAT". A WSL script then runs minisat over the corpus
 //! and the verdicts are compared.
@@ -106,6 +106,10 @@ fn main() {
     let count: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10000);
     let dir = args.get(2).cloned().unwrap_or_else(|| "fuzz-corpus".into());
     let seed: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0x9E3779B97F4A7C15);
+    let heur = match args.get(4).map(String::as_str) {
+        Some("vmtf") => cdcl::Heur::Vmtf,
+        _ => cdcl::Heur::Evsids,
+    };
     let mut rng = Rng(seed);
     std::fs::create_dir_all(&dir).expect("create out dir");
 
@@ -147,7 +151,7 @@ fn main() {
             }
         };
         std::fs::write(format!("{dir}/{i}.cnf"), to_dimacs(&f)).expect("write cnf");
-        let mut solver = cdcl::Solver::new(&f, true);
+        let mut solver = cdcl::Solver::with_config(&f, true, heur, None);
         let v = match solver.solve() {
             Verdict::Sat(model) => {
                 // Self-check: the model must satisfy the formula.
@@ -165,6 +169,7 @@ fn main() {
                 std::fs::write(format!("{dir}/{i}.drat"), out).expect("write drat");
                 "UNSAT"
             }
+            Verdict::Unknown => unreachable!("no timeout set in fuzz"),
         };
         let _ = writeln!(ours, "{i} {v}");
     }

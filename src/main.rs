@@ -9,16 +9,34 @@ use unsat_with_receipts::{cdcl, dimacs, Verdict};
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
-    // --proof <file>: write a DRAT certificate on UNSAT.
-    let mut proof_path: Option<String> = None;
-    if let Some(pos) = args.iter().position(|a| a == "--proof") {
+    let mut take_opt = |name: &str| -> Option<String> {
+        let pos = args.iter().position(|a| a == name)?;
         if pos + 1 >= args.len() {
-            eprintln!("--proof needs a file argument");
+            eprintln!("{name} needs an argument");
+            std::process::exit(1);
+        }
+        let v = args.remove(pos + 1);
+        args.remove(pos);
+        Some(v)
+    };
+    // --proof <file>: write a DRAT certificate on UNSAT.
+    let proof_path = take_opt("--proof");
+    // --heur evsids|vmtf (default evsids), --timeout <seconds>.
+    let heur = match take_opt("--heur").as_deref() {
+        None | Some("evsids") => cdcl::Heur::Evsids,
+        Some("vmtf") => cdcl::Heur::Vmtf,
+        Some(other) => {
+            eprintln!("unknown heuristic {other:?} (evsids|vmtf)");
             return ExitCode::from(1);
         }
-        proof_path = Some(args.remove(pos + 1));
-        args.remove(pos);
-    }
+    };
+    let deadline = take_opt("--timeout").map(|s| {
+        let secs: f64 = s.parse().unwrap_or_else(|_| {
+            eprintln!("bad --timeout value {s:?}");
+            std::process::exit(1);
+        });
+        std::time::Instant::now() + std::time::Duration::from_secs_f64(secs)
+    });
     let input = match args.get(1) {
         Some(path) => match std::fs::read_to_string(path) {
             Ok(s) => s,
@@ -44,7 +62,8 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let mut solver = cdcl::Solver::new(&formula, proof_path.is_some());
+    let mut solver =
+        cdcl::Solver::with_config(&formula, proof_path.is_some(), heur, deadline);
     match solver.solve() {
         Verdict::Sat(model) => {
             println!("s SATISFIABLE");
@@ -70,6 +89,10 @@ fn main() -> ExitCode {
             }
             println!("s UNSATISFIABLE");
             ExitCode::from(20)
+        }
+        Verdict::Unknown => {
+            println!("s UNKNOWN");
+            ExitCode::from(0)
         }
     }
 }

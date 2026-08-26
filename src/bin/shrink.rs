@@ -13,6 +13,7 @@ fn ours(f: &Formula) -> &'static str {
     match cdcl::solve(f) {
         Verdict::Sat(_) => "SAT",
         Verdict::Unsat => "UNSAT",
+        Verdict::Unknown => unreachable!("no timeout set in shrink"),
     }
 }
 

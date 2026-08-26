@@ -25,4 +25,6 @@ pub enum Verdict {
     /// Satisfiable, with a model: model[v] is the value of variable v+1.
     Sat(Vec<bool>),
     Unsat,
+    /// Timeout hit before a verdict.
+    Unknown,
 }
