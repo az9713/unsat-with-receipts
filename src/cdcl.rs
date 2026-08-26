@@ -652,10 +652,11 @@ impl Solver {
         self.cancel_until(0);
         self.assumptions = assumptions.iter().map(|&d| from_dimacs(d)).collect();
         if self.root_conflict {
-            // Emit the empty clause once: an empty proof means this flag
-            // came from construction/add_clause; a non-empty proof means a
-            // prior call already emitted it.
-            if self.proof.is_empty() {
+            // Emit the terminating empty clause exactly once. "Proof
+            // non-empty" is NOT the right guard: add_clause can set
+            // root_conflict on a solver that already logged learned
+            // clauses, and the refutation must still end with "0".
+            if self.proof_enabled && self.proof.last().map(String::as_str) != Some("0") {
                 self.proof_add(&[]);
             }
             return AssumeResult::Unsat(Vec::new());
@@ -864,6 +865,24 @@ mod tests {
             }
         }
         assert_eq!(models.len(), 3, "1 2 0 has exactly 3 models");
+    }
+
+    #[test]
+    fn add_clause_unsat_proof_ends_with_empty_clause() {
+        // Solve (proof non-empty is not required, but learning can happen),
+        // then make the formula UNSAT via add_clause. The DRAT log must
+        // still terminate with the empty clause.
+        let f = parse("1 2 0\n-1 2 0\n1 -2 0\n").unwrap();
+        let mut s = Solver::new(&f, true);
+        assert!(matches!(s.solve_under(&[]), AssumeResult::Sat(_)));
+        s.add_clause(&[1]);
+        s.add_clause(&[-1]);
+        assert!(matches!(s.solve_under(&[]), AssumeResult::Unsat(c) if c.is_empty()));
+        assert_eq!(s.proof.last().map(String::as_str), Some("0"));
+        // A repeat call must not append a second empty clause.
+        let len = s.proof.len();
+        assert!(matches!(s.solve_under(&[]), AssumeResult::Unsat(_)));
+        assert_eq!(s.proof.len(), len);
     }
 
     #[test]
