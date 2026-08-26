@@ -6,8 +6,18 @@
 //! through `proof_add` / `proof_delete`. Nothing else may mutate the
 //! clause database. Input clauses are not part of the proof.
 
-use crate::{Formula, Verdict};
+use crate::{Formula, Lit, Verdict};
 use std::time::Instant;
+
+/// Result of `solve_under`. Unsat carries a failed core: a subset of the
+/// assumptions that is jointly unsatisfiable with the formula (empty when
+/// the formula itself is UNSAT).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssumeResult {
+    Sat(Vec<bool>),
+    Unsat(Vec<Lit>),
+    Unknown,
+}
 
 /// Internal literal: var*2 + (1 if negative). Vars are 0-based.
 type L = u32;
@@ -88,6 +98,7 @@ pub struct Solver {
     qhead: usize,
     num_vars: usize,
     root_conflict: bool,
+    assumptions: Vec<L>,
     pub proof: Vec<String>,
     proof_enabled: bool,
 
@@ -151,6 +162,7 @@ impl Solver {
             qhead: 0,
             num_vars: n,
             root_conflict: false,
+            assumptions: Vec::new(),
             proof: Vec::new(),
             proof_enabled,
             heur,
@@ -580,16 +592,78 @@ impl Solver {
         }
     }
 
+    /// Failed-core extraction when assumption `failed` is already False
+    /// during assumption establishment. Walks the trail backward from the
+    /// first decision; every reason-less literal it reaches is an
+    /// assumption (branching has not started yet), so the result is a
+    /// subset of the assumptions that cannot hold together with the
+    /// formula.
+    fn analyze_final(&mut self, failed: L) -> Vec<Lit> {
+        let mut core = vec![to_dimacs(failed)];
+        if self.trail_lim.is_empty() {
+            return core; // implied false at level 0: {failed} alone is a core
+        }
+        let mut seen = vec![false; self.num_vars];
+        seen[var(failed) as usize] = true;
+        for i in (self.trail_lim[0]..self.trail.len()).rev() {
+            let l = self.trail[i];
+            let v = var(l) as usize;
+            if !seen[v] {
+                continue;
+            }
+            match self.reason[v] {
+                None => core.push(to_dimacs(l)),
+                Some(cr) => {
+                    for k in 0..self.clauses[cr].lits.len() {
+                        let q = self.clauses[cr].lits[k];
+                        if self.level[var(q) as usize] > 0 {
+                            seen[var(q) as usize] = true;
+                        }
+                    }
+                }
+            }
+        }
+        core
+    }
+
+    /// Incremental interface: add a clause between solve calls. Not part
+    /// of the proof (input clauses never are).
+    pub fn add_clause(&mut self, dimacs: &[i32]) {
+        self.cancel_until(0);
+        self.add_input_clause(dimacs);
+    }
+
     // ----- main loop -----
 
     pub fn solve(&mut self) -> Verdict {
+        match self.solve_under(&[]) {
+            AssumeResult::Sat(m) => Verdict::Sat(m),
+            AssumeResult::Unsat(_) => Verdict::Unsat,
+            AssumeResult::Unknown => Verdict::Unknown,
+        }
+    }
+
+    /// Solve under assumptions (DIMACS literals). The solver is reusable:
+    /// learned clauses persist across calls, and `add_clause` may add
+    /// constraints between calls. An Unsat result whose core is non-empty
+    /// means "unsatisfiable under these assumptions", NOT that the formula
+    /// is UNSAT — no empty clause enters the DRAT proof in that case.
+    pub fn solve_under(&mut self, assumptions: &[Lit]) -> AssumeResult {
+        self.cancel_until(0);
+        self.assumptions = assumptions.iter().map(|&d| from_dimacs(d)).collect();
         if self.root_conflict {
-            self.proof_add(&[]);
-            return Verdict::Unsat;
+            // Emit the empty clause once: an empty proof means this flag
+            // came from construction/add_clause; a non-empty proof means a
+            // prior call already emitted it.
+            if self.proof.is_empty() {
+                self.proof_add(&[]);
+            }
+            return AssumeResult::Unsat(Vec::new());
         }
         if self.propagate().is_some() {
+            self.root_conflict = true;
             self.proof_add(&[]);
-            return Verdict::Unsat;
+            return AssumeResult::Unsat(Vec::new());
         }
         let mut restart_limit = 64 * luby(self.restart_num);
         loop {
@@ -598,8 +672,14 @@ impl Solver {
                     self.conflicts += 1;
                     self.conflicts_since_restart += 1;
                     if self.trail_lim.is_empty() {
+                        // Latch: the refutation is level-0 facts + a
+                        // falsified clause the next call's propagate would
+                        // NOT re-detect (qhead is past it after
+                        // cancel_until). Without this, a later call
+                        // returns a garbage model.
+                        self.root_conflict = true;
                         self.proof_add(&[]);
-                        return Verdict::Unsat;
+                        return AssumeResult::Unsat(Vec::new());
                     }
                     let (learned, bt, lbd) = self.analyze(confl);
                     self.proof_add(&learned);
@@ -622,7 +702,7 @@ impl Solver {
                     if self.conflicts % 1024 == 0 {
                         if let Some(d) = self.deadline {
                             if Instant::now() >= d {
-                                return Verdict::Unknown;
+                                return AssumeResult::Unknown;
                             }
                         }
                     }
@@ -637,17 +717,45 @@ impl Solver {
                         self.cancel_until(0);
                     }
                 }
-                None => match self.pick_branch_var() {
-                    None => {
-                        let model = self.assign.iter().map(|&a| a == Val::True).collect();
-                        return Verdict::Sat(model);
+                None => {
+                    // Establish assumptions first, as pseudo-decisions,
+                    // one per decision level. Restarts and backjumps below
+                    // assumption levels land here again and re-establish.
+                    let mut assumed = None;
+                    while self.trail_lim.len() < self.assumptions.len() {
+                        let a = self.assumptions[self.trail_lim.len()];
+                        match self.value(a) {
+                            // Already true: dummy level keeps the
+                            // level-per-assumption accounting aligned.
+                            Val::True => self.trail_lim.push(self.trail.len()),
+                            Val::False => {
+                                let core = self.analyze_final(a);
+                                return AssumeResult::Unsat(core);
+                            }
+                            Val::Undef => {
+                                assumed = Some(a);
+                                break;
+                            }
+                        }
                     }
-                    Some(v) => {
+                    if let Some(a) = assumed {
                         self.trail_lim.push(self.trail.len());
-                        let phase_neg = !self.saved_phase[v as usize];
-                        self.enqueue(lit(v, phase_neg), None);
+                        self.enqueue(a, None);
+                        continue;
                     }
-                },
+                    match self.pick_branch_var() {
+                        None => {
+                            let model =
+                                self.assign.iter().map(|&a| a == Val::True).collect();
+                            return AssumeResult::Sat(model);
+                        }
+                        Some(v) => {
+                            self.trail_lim.push(self.trail.len());
+                            let phase_neg = !self.saved_phase[v as usize];
+                            self.enqueue(lit(v, phase_neg), None);
+                        }
+                    }
+                }
             }
         }
     }
@@ -707,6 +815,130 @@ mod tests {
                 (Verdict::Sat(m), true) => check_model(&f, m),
                 (Verdict::Unsat, false) => {}
                 _ => panic!("wrong verdict on {input:?}: {v:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn assumptions_edge_cases() {
+        // Empty assumptions == plain solve.
+        let f = parse("1 2 0\n-1 3 0\n").unwrap();
+        match Solver::new(&f, false).solve_under(&[]) {
+            AssumeResult::Sat(m) => check_model(&f, &m),
+            r => panic!("expected SAT, got {r:?}"),
+        }
+        // Contradictory assumptions on a satisfiable formula.
+        match Solver::new(&f, false).solve_under(&[1, -1]) {
+            AssumeResult::Unsat(core) => {
+                assert!(core.contains(&1) && core.contains(&-1), "core {core:?}")
+            }
+            r => panic!("expected assumption UNSAT, got {r:?}"),
+        }
+        // Assumption already false at level 0 (unit -1 in the formula).
+        let g = parse("-1 0\n2 0\n").unwrap();
+        match Solver::new(&g, false).solve_under(&[1]) {
+            AssumeResult::Unsat(core) => assert_eq!(core, vec![1]),
+            r => panic!("expected assumption UNSAT, got {r:?}"),
+        }
+        // Incremental reuse: solve, block the model via add_clause, resolve.
+        let h = parse("1 2 0\n").unwrap();
+        let mut s = Solver::new(&h, false);
+        let mut models = Vec::new();
+        loop {
+            match s.solve_under(&[]) {
+                AssumeResult::Sat(m) => {
+                    check_model(&h, &m);
+                    let block: Vec<i32> = m
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &b)| if b { -(i as i32 + 1) } else { i as i32 + 1 })
+                        .collect();
+                    models.push(m);
+                    s.add_clause(&block);
+                }
+                AssumeResult::Unsat(core) => {
+                    assert!(core.is_empty());
+                    break;
+                }
+                r => panic!("unexpected {r:?}"),
+            }
+        }
+        assert_eq!(models.len(), 3, "1 2 0 has exactly 3 models");
+    }
+
+    #[test]
+    fn assumptions_agree_with_units_on_random_3sat() {
+        let mut state = 0x9E3779B97F4A7C15u64;
+        let mut rng = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for round in 0..300 {
+            let n = 4 + (rng() % 10) as usize;
+            let m = (n as f64 * 4.26).round() as usize;
+            let mut f = Formula {
+                num_vars: n,
+                clauses: Vec::new(),
+            };
+            for _ in 0..m {
+                let mut c = Vec::new();
+                for _ in 0..3 {
+                    let v = (rng() % n as u64) as i32 + 1;
+                    let s = if rng() & 1 == 0 { 1 } else { -1 };
+                    c.push(v * s);
+                }
+                f.clauses.push(c);
+            }
+            // One persistent solver, three assumption sets in sequence —
+            // the state-reset stress is where incremental bugs live.
+            let mut inc = Solver::new(&f, false);
+            for _ in 0..3 {
+                let k = 1 + (rng() % 3) as usize;
+                let mut assumps: Vec<i32> = Vec::new();
+                for _ in 0..k {
+                    let v = (rng() % n as u64) as i32 + 1;
+                    if !assumps.iter().any(|a| a.abs() == v) {
+                        assumps.push(if rng() & 1 == 0 { v } else { -v });
+                    }
+                }
+                // Oracle: fresh solve of F plus assumption unit clauses.
+                let mut g = f.clone();
+                for &a in &assumps {
+                    g.clauses.push(vec![a]);
+                }
+                let expected = Solver::new(&g, false).solve();
+                match (inc.solve_under(&assumps), &expected) {
+                    (AssumeResult::Sat(m), Verdict::Sat(_)) => {
+                        check_model(&f, &m);
+                        for &a in &assumps {
+                            assert!(
+                                m[a.unsigned_abs() as usize - 1] == (a > 0),
+                                "round {round}: model violates assumption {a}"
+                            );
+                        }
+                    }
+                    (AssumeResult::Unsat(core), Verdict::Unsat) => {
+                        // Core is a subset of the assumptions...
+                        for c in &core {
+                            assert!(assumps.contains(c), "round {round}: {c} not assumed");
+                        }
+                        // ...and is itself sufficient for UNSAT.
+                        let mut h = f.clone();
+                        for &c in &core {
+                            h.clauses.push(vec![c]);
+                        }
+                        assert_eq!(
+                            Solver::new(&h, false).solve(),
+                            Verdict::Unsat,
+                            "round {round}: core {core:?} not sufficient"
+                        );
+                    }
+                    (got, _) => panic!(
+                        "round {round}: divergence assumps={assumps:?} inc={got:?} oracle={expected:?} f={f:?}"
+                    ),
+                }
             }
         }
     }

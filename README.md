@@ -73,6 +73,13 @@ drat-trim s.cnf s.drat        # s VERIFIED
   for any verdict divergence, with minisat in the loop.
 - Heuristics: EVSIDS (default) or VMTF via `--heur`, Luby restarts
   (base 64), LBD-tiered deletion (glue <= 2 kept forever), phase saving.
+- Incremental interface (library): `Solver::solve_under(&assumptions)`
+  solves under assumptions and keeps learned clauses across calls;
+  `Solver::add_clause` adds constraints between calls. An UNSAT-under-
+  assumptions result returns a failed core (a subset of the assumptions
+  jointly unsatisfiable with the formula) instead of a DRAT receipt —
+  the empty clause is never emitted in that case, so "every UNSAT ships
+  a receipt" reads "every UNSAT *of the formula*".
 
 ## Benchmarks (SATLIB uniform random 3-SAT, 10 s per instance)
 
