@@ -147,7 +147,8 @@ fn main() {
             }
         };
         std::fs::write(format!("{dir}/{i}.cnf"), to_dimacs(&f)).expect("write cnf");
-        let v = match cdcl::solve(&f) {
+        let mut solver = cdcl::Solver::new(&f, true);
+        let v = match solver.solve() {
             Verdict::Sat(model) => {
                 // Self-check: the model must satisfy the formula.
                 for c in &f.clauses {
@@ -158,7 +159,12 @@ fn main() {
                 }
                 "SAT"
             }
-            Verdict::Unsat => "UNSAT",
+            Verdict::Unsat => {
+                let mut out = solver.proof.join("\n");
+                out.push('\n');
+                std::fs::write(format!("{dir}/{i}.drat"), out).expect("write drat");
+                "UNSAT"
+            }
         };
         let _ = writeln!(ours, "{i} {v}");
     }
