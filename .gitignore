@@ -4,3 +4,4 @@ fuzz-vmtf/
 benchmarks/
 *.cnf
 *.drat
+TESTING-GUIDE.html
