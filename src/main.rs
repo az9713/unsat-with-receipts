@@ -5,7 +5,7 @@
 //! Errors -> exit code 1.
 
 use std::process::ExitCode;
-use unsat_with_receipts::{dimacs, dpll, Verdict};
+use unsat_with_receipts::{cdcl, dimacs, Verdict};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -34,7 +34,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    match dpll::solve(&formula) {
+    match cdcl::solve(&formula) {
         Verdict::Sat(model) => {
             println!("s SATISFIABLE");
             let lits: Vec<String> = model

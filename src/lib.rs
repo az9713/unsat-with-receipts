@@ -2,6 +2,7 @@
 //! The parser and CLI conventions survive to M2+. The DPLL solver is
 //! disposable scaffolding; M2 replaces it with CDCL.
 
+pub mod cdcl;
 pub mod dimacs;
 pub mod dpll;
 
