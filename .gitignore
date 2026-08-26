@@ -2,3 +2,5 @@
 fuzz-corpus/
 fuzz-vmtf/
 benchmarks/
+*.cnf
+*.drat

@@ -37,6 +37,32 @@ bash scripts/compare.sh fuzz-corpus       # minisat verdicts (WSL/Linux)
 bash scripts/check-proofs.sh fuzz-corpus  # drat-trim over every proof
 ```
 
+## Demos — receipts for real claims
+
+Evidence page: https://az9713.github.io/unsat-with-receipts/
+
+**Circuit equivalence** (`src/bin/miter.rs`): Tseitin-encodes a ripple-carry
+adder and a carry-lookahead adder over shared inputs into a miter. UNSAT =
+the circuits are equivalent, and the DRAT proof is the receipt. `--buggy`
+plants a carry bug as a negative control — the miter goes SAT and the model
+decodes to a concrete counterexample input.
+
+```
+cargo run --release --bin miter -- --bits 16 --proof m.drat --dimacs m.cnf
+drat-trim m.cnf m.drat        # s VERIFIED
+cargo run --release --bin miter -- --buggy
+# s SATISFIABLE; counterexample: a=8 b=10 cin=1 (19 vs 51)
+```
+
+**Sudoku uniqueness** (`src/bin/sudoku.rs`): solves a 9x9 puzzle, then adds
+a blocking clause forbidding that solution and re-solves with proof logging
+on. UNSAT means the solution is *unique* — proven, with a receipt.
+
+```
+cargo run --release --bin sudoku -- --proof s.drat --dimacs s.cnf
+drat-trim s.cnf s.drat        # s VERIFIED
+```
+
 ## Design
 
 - CDCL: two-watched-literal propagation, 1UIP learning, backjumping.
