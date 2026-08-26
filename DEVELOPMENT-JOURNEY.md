@@ -1,8 +1,8 @@
-# Development Journey — "unsat-with-receipts" (credit-burn build, 2026-08-25/26)
+# Development Journey — "unsat-with-receipts" (2026-08-25/26)
 
 **Date:** 2026-08-26
 **Deliverable:** https://github.com/az9713/unsat-with-receipts — a proof-carrying CDCL SAT solver in Rust, zero dependencies
-**Brief:** build a SAT solver whose UNSAT answers ship machine-checkable DRAT receipts, gated milestone by milestone against independent oracles (minisat, drat-trim), during a credit-burn window.
+**Brief:** build a SAT solver whose UNSAT answers ship machine-checkable DRAT receipts, gated milestone by milestone against independent oracles (minisat, drat-trim).
 **Evidence page:** `docs/index.html` (GitHub Pages)
 
 **Provenance warning.** This document was written after a `/clear`. Sections
@@ -11,6 +11,8 @@ on M1–M4 are **reconstructed** from `HANDOFF.md`, the five commit messages,
 The M5 section is written from the live session that produced it. Where the
 sources are silent (exact error text from M1–M4, dead ends inside those
 milestones), this document says nothing rather than inventing detail.
+Revised once after the M5 commit, at Simon's request: framing trimmed,
+the decision and wart lists expanded from the still-live M5 transcript.
 
 ## 1. The brief — infrastructure that proves its own answers
 
@@ -87,10 +89,27 @@ M5 decisions (live):
   solution, re-solve with proof on. UNSAT = the solution is unique, and the
   DRAT file is the receipt for that claim. This is the project's thesis in
   miniature; a general Sudoku tool was deliberately not built.
+- **Sudoku encoding:** cell exactly-one plus pairwise at-most-one per row,
+  column, and box — no at-least-one clauses per unit. Pigeonhole makes the
+  encoding complete anyway (nine cells, nine digits, no repeats forces every
+  digit to appear), so the extended encoding's extra 243 clause groups were
+  cut as redundant.
+- **Puzzle source:** Wikipedia's standard example grid, trusted to be
+  unique. The trust is checked at runtime, not assumed: a non-unique puzzle
+  would surface as SAT on the blocked re-solve, so the demo cannot silently
+  claim a false uniqueness.
 - **`--dimacs` dump flags** on both demos, added because drat-trim needs the
   CNF alongside the proof — the internal formula had to become a file.
+- **Evidence-page numbers recomputed, not copied.** The SATLIB tables on
+  `docs/index.html` came from a throwaway Python aggregation over the
+  committed CSVs, then cross-checked against HANDOFF and README (both
+  matched: 25 and 414 timeouts / 6399). Three independent sources agreeing
+  beats one source transcribed.
+- **Demo outputs are scratch.** `miter*.cnf/.drat` and `sudoku.cnf/.drat`
+  at the repo root were deleted and gitignored (`*.cnf`, `*.drat`) rather
+  than committed — one command regenerates them, and the README says which.
 - **Descoped:** incremental solving under assumptions (spec marked it
-  optional-if-time); the Proof Foundry overnight burner fleets (workflow
+  optional-if-time); the Proof Foundry overnight fleets (workflow
   opt-in is per-session and nobody was watching this session).
 
 ## 4. The oracle problem — trusting a solver you just wrote
@@ -118,7 +137,7 @@ section 6.
 | Tool / feature | What it did this session (M5) |
 |---|---|
 | `HANDOFF.md` + `handoff-after-clear` skill | Cold-start resume; all environment facts held |
-| advisor | Locked M5 work order; added negative control + uniqueness framing |
+| advisor (2 calls) | Opening: locked M5 work order, added negative control + uniqueness framing. Closing: caught the missing M5 hash in HANDOFF.md |
 | Bash tool (Git Bash) | cargo builds, WSL oracle runs, git commits via `git commit -F -` |
 | WSL (`wsl -u root -e bash -c`) | drat-trim verification of miter and Sudoku proofs |
 | `dev-journey` skill | This document |
@@ -160,6 +179,15 @@ Live in M5:
 8. **drat-trim needs the CNF, not just the proof.** Both demos initially
    wrote only `.drat`; the `--dimacs` flag was added so the internally built
    formula becomes a checkable file pair.
+9. **HANDOFF.md briefly lied about M5.** It was rewritten to say
+   "M5 (latest commit)" *before* that commit existed — the only milestone
+   entry without a hash. The closing advisor review caught it; the hash
+   `5a998ac` was patched in after the push. Rule: a resume file written
+   before its commit lies about the one identifier that matters.
+10. **GitHub Pages 404s at first.** The `gh api ... /pages` enable call
+   succeeded immediately, but the live URL returned 404 three times over
+   ~60 s before the first 200. The poll loop, not the API response, was the
+   verification — a clean API call is not a deployed page.
 
 ## 7. Verification
 
@@ -193,7 +221,7 @@ Open options, not promises:
 
 - **Incremental solving under assumptions** — the spec's optional extension;
   the solver's `with_config` API is the natural seam.
-- **Proof Foundry wave-3 fleets** — the overnight adversarial-proof burner
+- **Proof Foundry wave-3 fleets** — the overnight adversarial-proof runner
   was never spawned (template at
   `Downloads\projects\fable_5_maxxing_3_me\.claude\workflows\adversarial-proofs.js`,
   fleets pinned to Opus/Sonnet). Requires a fresh per-session opt-in.
