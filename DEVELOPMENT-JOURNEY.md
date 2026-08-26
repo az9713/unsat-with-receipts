@@ -11,7 +11,7 @@ on M1–M4 are **reconstructed** from `HANDOFF.md`, the five commit messages,
 The M5 section is written from the live session that produced it. Where the
 sources are silent (exact error text from M1–M4, dead ends inside those
 milestones), this document says nothing rather than inventing detail.
-Revised once after the M5 commit, at Simon's request: framing trimmed,
+Revised once after the M5 commit, on request: framing trimmed,
 the decision and wart lists expanded from the still-live M5 transcript.
 
 ## 1. The brief — infrastructure that proves its own answers
@@ -222,9 +222,9 @@ Open options, not promises:
 - **Incremental solving under assumptions** — the spec's optional extension;
   the solver's `with_config` API is the natural seam.
 - **Proof Foundry wave-3 fleets** — the overnight adversarial-proof runner
-  was never spawned (template at
-  `Downloads\projects\fable_5_maxxing_3_me\.claude\workflows\adversarial-proofs.js`,
-  fleets pinned to Opus/Sonnet). Requires a fresh per-session opt-in.
+  was never spawned (the workflow template lives in a private local
+  project, not in this repo; fleets pinned to Opus/Sonnet). Requires a
+  fresh per-session opt-in.
 - **hole10** remains the one unsolved instance in the 60 s tier — pigeonhole
   is exponential for resolution, so this is expected, not a defect.
 
